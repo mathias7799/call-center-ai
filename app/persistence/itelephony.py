@@ -168,6 +168,27 @@ class ITelephony(ABC):
         pass
 
     @abstractmethod
+    @start_as_current_span("telephony_play_media_file")
+    async def play_media_file(
+        self,
+        call_connection_id: str,
+        file_url: str,
+        context: str | None = None,
+    ) -> bool:
+        """
+        Play an audio file from URL on the call.
+
+        Args:
+            call_connection_id: Unique identifier for the call connection
+            file_url: URL of the audio file to play
+            context: Optional context identifier for tracking
+
+        Returns:
+            True if playback was initiated successfully
+        """
+        pass
+
+    @abstractmethod
     @start_as_current_span("telephony_recognize_speech")
     async def recognize_speech(
         self,

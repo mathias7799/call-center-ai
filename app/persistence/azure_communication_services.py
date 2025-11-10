@@ -245,6 +245,33 @@ class AzureCommunicationServicesTelephony(ITelephony):
             logger.exception("Error playing media on call (%s)", call_connection_id)
             return False
 
+    async def play_media_file(
+        self,
+        call_connection_id: str,
+        file_url: str,
+        context: str | None = None,
+    ) -> bool:
+        """Play an audio file from URL on the call."""
+        try:
+            client = await self._get_client()
+            call_connection = client.get_call_connection(call_connection_id)
+
+            play_source = FileSource(url=file_url)
+
+            await call_connection.play_media_to_all(
+                play_source=play_source,
+                operation_context=context,
+            )
+
+            logger.debug("Playing file %s on call (%s)", file_url, call_connection_id)
+            return True
+
+        except Exception:
+            logger.exception(
+                "Error playing file %s on call (%s)", file_url, call_connection_id
+            )
+            return False
+
     async def recognize_speech(
         self,
         call_connection_id: str,

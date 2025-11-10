@@ -252,6 +252,47 @@ class SipTelephony(ITelephony):
             "SIP media playback not implemented - this is a POC stub"
         )
 
+    async def play_media_file(
+        self,
+        call_connection_id: str,
+        file_url: str,
+        context: str | None = None,
+    ) -> bool:
+        """
+        Play an audio file from URL on the SIP call.
+
+        TODO: Implement file playback via RTP.
+
+        Steps:
+        1. Fetch audio file from URL
+        2. Decode audio format (WAV, MP3, etc.)
+        3. Convert to RTP codec (G.711 or configured codec)
+        4. Send RTP packets to peer
+        5. Wait for playback completion
+
+        Args:
+            call_connection_id: SIP call-id
+            file_url: URL of audio file
+            context: Optional context for tracking
+
+        Returns:
+            True if playback started successfully
+        """
+        logger.info(
+            "SIP play_media_file (STUB): call_id=%s, file_url=%s, context=%s",
+            call_connection_id,
+            file_url,
+            context,
+        )
+
+        # TODO: Fetch and decode audio file
+        # TODO: Convert to G.711/configured codec
+        # TODO: Send via RTP
+
+        raise NotImplementedError(
+            "SIP file playback not implemented - this is a POC stub"
+        )
+
     async def recognize_speech(
         self,
         call_connection_id: str,

@@ -157,16 +157,23 @@ async def handle_media(
     context: ContextEnum | None = None,
 ) -> None:
     """
-    Play a media to a call participant.
+    Play a media file to a call participant.
 
     If `context` is provided, it will be used to track the operation.
 
-    TODO: This function needs ITelephony interface extension to support FileSource (URL-based media).
-    Currently the interface only supports text-based play_media with SSML.
+    Can raise a `CallHangupException` if the call is hung up.
     """
-    # TODO: Implement file-based media playback via ITelephony interface
-    # For now, this will need to be handled by the specific implementation
-    raise NotImplementedError("File-based media playback needs ITelephony interface extension")
+    logger.info("Playing media file: %s", sound_url)
+    try:
+        assert call.voice_id, "Voice ID is required to control the call"
+        await telephony.play_media_file(
+            call_connection_id=call.voice_id,
+            file_url=sound_url,
+            context=_context_serializer({context}),
+        )
+    except Exception as e:
+        logger.exception("Error playing media file")
+        raise CallHangupException from e
 
 
 async def handle_automation_tts(  # noqa: PLR0913

@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 from app.helpers.call_utils import (
     AECStream,
     SttClient,
-    # handle_media,  # Temporarily disabled - needs ITelephony interface extension for file-based media
+    handle_media,
     handle_realtime_tts,
     tts_sentence_split,
     use_tts_client,
@@ -370,16 +370,13 @@ async def _continue_chat(  # noqa: PLR0915, PLR0913
                 # Do not play timeout prompt plus loading, it can be frustrating for the user
                 elif loading_task.done():
                     loading_task = _loading_task()
-                    # TODO: Re-enable loading sound once ITelephony interface supports file-based media
-                    # The handle_media function needs to be extended to support FileSource playback
-                    # See: handle_media in call_utils.py
-                    # await scheduler.spawn(
-                    #     handle_media(
-                    #         call=call,
-                    #         telephony=telephony,
-                    #         sound_url=CONFIG.prompts.sounds.loading(),
-                    #     )
-                    # )
+                    await scheduler.spawn(
+                        handle_media(
+                            call=call,
+                            telephony=telephony,
+                            sound_url=CONFIG.prompts.sounds.loading(),
+                        )
+                    )
 
             # Wait to not block the event loop for other requests
             await asyncio.sleep(1)
