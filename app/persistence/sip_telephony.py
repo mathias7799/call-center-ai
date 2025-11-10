@@ -316,6 +316,30 @@ class SipTelephony(ITelephony):
             "SIP media streaming not implemented - this is a POC stub"
         )
 
+    async def stop_media_streaming(self, call_connection_id: str) -> bool:
+        """
+        Stop media streaming on SIP call.
+
+        For SIP, this would stop the RTP <-> WebSocket bridge.
+
+        Args:
+            call_connection_id: SIP call-id
+
+        Returns:
+            True if streaming was stopped successfully
+        """
+        logger.info(
+            "SIP stop_media_streaming (STUB): call_id=%s",
+            call_connection_id,
+        )
+
+        # TODO: Stop WebSocket bridge
+        # TODO: Stop RTP packet processing (but keep call active)
+
+        raise NotImplementedError(
+            "SIP media streaming not implemented - this is a POC stub"
+        )
+
     async def stream_audio(
         self,
         websocket: Any,

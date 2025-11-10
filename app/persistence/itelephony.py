@@ -209,6 +209,23 @@ class ITelephony(ABC):
         pass
 
     @abstractmethod
+    @start_as_current_span("telephony_stop_media_streaming")
+    async def stop_media_streaming(
+        self,
+        call_connection_id: str,
+    ) -> bool:
+        """
+        Stop media streaming on the call.
+
+        Args:
+            call_connection_id: Unique identifier for the call connection
+
+        Returns:
+            True if streaming was stopped successfully
+        """
+        pass
+
+    @abstractmethod
     async def stream_audio(
         self,
         websocket: Any,  # WebSocket connection (framework-agnostic)

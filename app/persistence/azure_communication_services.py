@@ -314,6 +314,22 @@ class AzureCommunicationServicesTelephony(ITelephony):
             )
             return False
 
+    async def stop_media_streaming(self, call_connection_id: str) -> bool:
+        """Stop media streaming on the call."""
+        try:
+            client = await self._get_client()
+            call_connection = client.get_call_connection(call_connection_id)
+            await call_connection.stop_media_streaming()
+
+            logger.debug("Stopped media streaming on call (%s)", call_connection_id)
+            return True
+
+        except Exception:
+            logger.exception(
+                "Error stopping media streaming on call (%s)", call_connection_id
+            )
+            return False
+
     async def stream_audio(
         self,
         websocket: Any,
