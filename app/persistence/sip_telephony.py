@@ -27,7 +27,9 @@ from app.helpers.logging import logger
 from app.helpers.pydantic_types.phone_numbers import PhoneNumber
 from app.models.readiness import ReadinessEnum
 from app.persistence.itelephony import ITelephony
-from app.persistence.sip import SipAccount, SipCall, RtpWebSocketBridge
+from app.persistence.sip import RtpWebSocketBridge
+from app.persistence.sip.account_pjsip import PjsipAccount
+from app.persistence.sip.call_pjsip import PjsipCall
 
 # PJSIP will be imported when available
 try:
@@ -64,9 +66,11 @@ class SipTelephony(ITelephony):
         self._config = config
         self._endpoint: Any = None  # pj.Endpoint
         self._transport: Any = None  # pj.Transport
-        self._account: SipAccount | None = None
-        self._calls: dict[str, SipCall] = {}
+        self._account: PjsipAccount | None = None
+        self._calls: dict[str, PjsipCall] = {}
         self._initialized = False
+        self._event_loop_task: asyncio.Task | None = None
+        self._running = False
 
         # Check if PJSIP is available
         if not PJSIP_AVAILABLE:
@@ -103,9 +107,18 @@ class SipTelephony(ITelephony):
 
         # Configure endpoint
         ep_cfg = pj.EpConfig()
+
+        # CRITICAL: Threading configuration for Python
+        # Python bindings require single-threaded mode with manual event polling
+        ep_cfg.uaConfig.threadCnt = 0  # Disable worker threads
+        ep_cfg.uaConfig.mainThreadOnly = True  # All operations on main thread
+
+        # Logging configuration
         ep_cfg.logConfig.level = 4  # INFO level
         ep_cfg.logConfig.consoleLevel = 4
+
         self._endpoint.libInit(ep_cfg)
+        logger.info("PJSIP endpoint initialized (single-threaded mode for Python)")
 
         # Create transport (UDP/TCP/TLS)
         transport_type_map = {
@@ -128,38 +141,55 @@ class SipTelephony(ITelephony):
         # Create and register account
         self._register_account()
 
+        # Start event polling loop
+        self._running = True
+        self._event_loop_task = asyncio.create_task(self._pjsip_event_loop())
+        logger.info("PJSIP event polling loop started")
+
+    async def _pjsip_event_loop(self) -> None:
+        """
+        Event polling loop for PJSIP in single-threaded mode.
+
+        When threadCnt=0, PJSIP requires manual event polling via libHandleEvents().
+        This loop handles SIP events (incoming calls, registration, etc.) at regular intervals.
+        """
+        if not PJSIP_AVAILABLE or not self._endpoint:
+            return
+
+        logger.info("PJSIP event loop starting")
+
+        while self._running:
+            try:
+                # Poll for events with 10ms timeout
+                # This processes SIP messages, timers, and callbacks
+                self._endpoint.libHandleEvents(10)
+
+                # Sleep to prevent busy-waiting (50ms interval)
+                await asyncio.sleep(0.05)
+
+            except Exception:
+                logger.exception("Error in PJSIP event loop")
+                await asyncio.sleep(1.0)  # Back off on error
+
+        logger.info("PJSIP event loop stopped")
+
     def _register_account(self) -> None:
         """Register SIP account with gateway."""
         if not PJSIP_AVAILABLE or not pj or not self._endpoint:
             return
 
-        # Create account configuration
-        acc_cfg = pj.AccountConfig()
-        acc_cfg.idUri = f"sip:{self._config.username}@{self._config.gateway_host}"
-        acc_cfg.regConfig.registrarUri = (
-            f"sip:{self._config.gateway_host}:{self._config.gateway_port}"
-        )
+        try:
+            # Create PjsipAccount instance (extends pj.Account)
+            self._account = PjsipAccount(self._config)
 
-        # Add authentication credentials
-        cred = pj.AuthCredInfo(
-            "digest",  # Authentication scheme
-            "*",  # Realm (wildcard)
-            self._config.username,
-            0,  # Data type (0 = plain text password)
-            self._config.password.get_secret_value(),
-        )
-        acc_cfg.sipConfig.authCreds.append(cred)
+            # Create account configuration and register with PJSIP
+            # This creates the account object and sends REGISTER request
+            self._account.create_and_register(self._endpoint)
 
-        # Optional: STUN server for NAT traversal
-        if self._config.stun_server:
-            acc_cfg.natConfig.stunServer.append(self._config.stun_server)
+            logger.info("SIP account created and registration initiated")
 
-        # Create account
-        self._account = SipAccount(self._config, self._endpoint)
-        # In real PJSIP integration:
-        # self._account.create(acc_cfg)
-
-        logger.info("SIP account configured for registration")
+        except Exception:
+            logger.exception("Failed to create and register SIP account")
 
     async def readiness(self) -> ReadinessEnum:
         """
@@ -236,7 +266,7 @@ class SipTelephony(ITelephony):
             raise RuntimeError(f"SIP call not found: {incoming_context}")
 
         # Answer the call (sends SIP 200 OK)
-        success = await call.answer()
+        success = await call.answer_call()
         if not success:
             raise RuntimeError(f"Failed to answer SIP call: {incoming_context}")
 
@@ -270,7 +300,7 @@ class SipTelephony(ITelephony):
             return False
 
         # Hangup the call
-        success = await call.hangup()
+        success = await call.hangup_call()
 
         # Remove from active calls
         if call_connection_id in self._calls:
@@ -653,13 +683,31 @@ class SipTelephony(ITelephony):
 
         logger.info("Shutting down SIP telephony")
 
+        # Stop event polling loop
+        self._running = False
+        if self._event_loop_task:
+            try:
+                await asyncio.wait_for(self._event_loop_task, timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("Event loop task did not stop in time")
+                self._event_loop_task.cancel()
+            except Exception:
+                logger.exception("Error stopping event loop task")
+
         # Hangup all active calls
         for call_id in list(self._calls.keys()):
             await self.hangup_call(call_id)
 
-        # Unregister account
+        # Unregister account (synchronous PJSIP call, wrapped in async)
         if self._account:
-            await self._account.unregister()
+            try:
+                # PjsipAccount unregister is synchronous via PJSIP
+                # Just delete the account to trigger unregistration
+                del self._account
+                self._account = None
+                logger.info("SIP account unregistered")
+            except Exception:
+                logger.exception("Error unregistering SIP account")
 
         # Destroy PJSIP endpoint
         try:
