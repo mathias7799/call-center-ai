@@ -98,13 +98,23 @@ _jinja.filters["markdown"] = lambda x: (
     mistune.create_markdown(plugins=["abbr", "speedup", "url"])(x) if x else ""
 )  # pyright: ignore
 
-# Azure Communication Services
-_source_caller = PhoneNumberIdentifier(CONFIG.communication_services.phone_number)
-logger.info("Using phone number %s", CONFIG.communication_services.phone_number)
-_communication_services_jwks_client = jwt.PyJWKClient(
-    cache_keys=True,
-    uri="https://acscallautomation.communication.azure.com/calling/keys",
-)
+# Telephony (pluggable provider)
+_telephony = CONFIG.telephony.instance
+logger.info("Using telephony provider: %s", CONFIG.telephony.mode.value)
+
+# Source caller - get phone number based on telephony mode
+from app.helpers.config_models.telephony import ModeEnum as TelephonyModeEnum
+if CONFIG.telephony.mode == TelephonyModeEnum.AZURE_COMMUNICATION_SERVICES:
+    _source_caller = PhoneNumberIdentifier(CONFIG.communication_services.phone_number)
+    _telephony_phone_number = CONFIG.communication_services.phone_number
+elif CONFIG.telephony.mode == TelephonyModeEnum.SIP:
+    assert CONFIG.telephony.sip, "SIP config required when using SIP mode"
+    _source_caller = CONFIG.telephony.sip.phone_number
+    _telephony_phone_number = CONFIG.telephony.sip.phone_number
+else:
+    raise ValueError(f"Unsupported telephony mode: {CONFIG.telephony.mode}")
+
+logger.info("Using phone number %s", _telephony_phone_number)
 
 # Persistences
 _cache = CONFIG.cache.instance
@@ -116,18 +126,22 @@ _sms = CONFIG.sms.instance
 _sms_queue = CONFIG.queue.sms
 _training_queue = CONFIG.queue.training
 
-# Communication Services callback
+# Telephony callback URLs (works for both Azure and SIP)
 assert CONFIG.public_domain, "public_domain config is not set"
-_COMMUNICATIONSERVICES_WSS_TPL = urljoin(
+_TELEPHONY_WSS_TPL = urljoin(
     str(CONFIG.public_domain).replace("https://", "wss://"),
-    "/communicationservices/wss/{call_id}/{callback_secret}",
+    "/telephony/wss/{call_id}/{callback_secret}",
 )
-logger.info("Using WebSocket URL %s", _COMMUNICATIONSERVICES_WSS_TPL)
-_COMMUNICATIONSERVICES_CALLABACK_TPL = urljoin(
+logger.info("Using WebSocket URL %s", _TELEPHONY_WSS_TPL)
+_TELEPHONY_CALLBACK_TPL = urljoin(
     str(CONFIG.public_domain),
-    "/communicationservices/callback/{call_id}/{callback_secret}",
+    "/telephony/callback/{call_id}/{callback_secret}",
 )
-logger.info("Using callback URL %s", _COMMUNICATIONSERVICES_CALLABACK_TPL)
+logger.info("Using callback URL %s", _TELEPHONY_CALLBACK_TPL)
+
+# Backward compatibility URLs for Azure Communication Services
+_COMMUNICATIONSERVICES_WSS_TPL = _TELEPHONY_WSS_TPL
+_COMMUNICATIONSERVICES_CALLABACK_TPL = _TELEPHONY_CALLBACK_TPL
 
 
 @asynccontextmanager
@@ -461,7 +475,7 @@ async def call_event(
     # Execute business logic
     await on_new_call(
         callback_url=callback_url,
-        client=await _use_automation_client(),
+        telephony=_get_telephony(),
         incoming_context=call_context,
         phone_number=phone_number,
         wss_url=wss_url,
@@ -593,8 +607,8 @@ async def communicationservices_wss_post(
     await websocket.accept()
     logger.info("WebSocket connection established")
 
-    # Client SDK
-    automation_client = await _use_automation_client()
+    # Telephony provider
+    telephony = _get_telephony()
 
     # Queues
     audio_in: asyncio.Queue[bytes] = asyncio.Queue()
@@ -693,7 +707,7 @@ async def communicationservices_wss_post(
                 audio_out=audio_out,
                 audio_sample_rate=16000,
                 call=call,
-                client=automation_client,
+                telephony=telephony,
                 post_callback=_trigger_post_event,
                 scheduler=scheduler,
                 training_callback=_trigger_training_event,
@@ -782,8 +796,8 @@ async def _communicationservices_event_worker(
         operation_context = event.data.get("operationContext", None)
         operation_contexts = _str_to_contexts(operation_context)
 
-        # Client SDK
-        automation_client = await _use_automation_client()
+        # Telephony provider
+        telephony = _get_telephony()
 
         # Log
         logger.debug("Call event received %s", event_type)
@@ -794,7 +808,7 @@ async def _communicationservices_event_worker(
                 server_call_id = event.data["serverCallId"]
                 await on_call_connected(
                     call=call,
-                    client=automation_client,
+                    telephony=telephony,
                     scheduler=scheduler,
                     server_call_id=server_call_id,
                 )
@@ -803,7 +817,7 @@ async def _communicationservices_event_worker(
             case "Microsoft.Communication.CallDisconnected":
                 await on_call_disconnected(
                     call=call,
-                    client=automation_client,
+                    telephony=telephony,
                     post_callback=_trigger_post_event,
                     scheduler=scheduler,
                 )
@@ -816,7 +830,7 @@ async def _communicationservices_event_worker(
                     label_detected: str = event.data["choiceResult"]["label"]
                     await on_ivr_recognized(
                         call=call,
-                        client=automation_client,
+                        telephony=telephony,
                         label=label_detected,
                         scheduler=scheduler,
                     )
@@ -833,7 +847,7 @@ async def _communicationservices_event_worker(
                 )
                 await on_automation_recognize_error(
                     call=call,
-                    client=automation_client,
+                    telephony=telephony,
                     contexts=operation_contexts,
                     post_callback=_trigger_post_event,
                     scheduler=scheduler,
@@ -850,7 +864,7 @@ async def _communicationservices_event_worker(
             case "Microsoft.Communication.PlayCompleted":
                 await on_automation_play_completed(
                     call=call,
-                    client=automation_client,
+                    telephony=telephony,
                     contexts=operation_contexts,
                     post_callback=_trigger_post_event,
                     scheduler=scheduler,
@@ -868,7 +882,7 @@ async def _communicationservices_event_worker(
                 sub_code: int = result_information["subCode"]
                 await on_transfer_error(
                     call=call,
-                    client=automation_client,
+                    telephony=telephony,
                     error_code=sub_code,
                     post_callback=_trigger_post_event,
                     scheduler=scheduler,
@@ -1128,26 +1142,14 @@ def _standard_error(
     )
 
 
-@lru_acache()
-async def _use_automation_client() -> CallAutomationClient:
+from app.persistence.itelephony import ITelephony
+
+
+def _get_telephony() -> ITelephony:
     """
-    Get the call automation client for Azure Communication Services.
+    Get the configured telephony provider.
 
-    Object is cached for performance.
-
-    Returns a `CallAutomationClient` instance.
+    Returns the ITelephony instance configured at startup.
+    This works for both Azure Communication Services and SIP providers.
     """
-    logger.debug(
-        "Using Automation Client for %s", CONFIG.communication_services.endpoint
-    )
-
-    return CallAutomationClient(
-        # Deployment
-        endpoint=CONFIG.communication_services.endpoint,
-        # Performance
-        transport=await azure_transport(),
-        # Authentication
-        credential=AzureKeyCredential(
-            CONFIG.communication_services.access_key.get_secret_value()
-        ),  # Cannot place calls with RBAC, need to use access key (see: https://learn.microsoft.com/en-us/azure/communication-services/concepts/authentication#authentication-options)
-    )
+    return _telephony

@@ -53,9 +53,9 @@ _db = CONFIG.database.instance
 @start_as_current_span("on_new_call")
 async def on_new_call(
     callback_url: str,
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     incoming_context: str,
-    phone_number: str,
+    phone_number: "PhoneNumber",
     wss_url: str,
 ) -> bool:
     """
@@ -63,42 +63,27 @@ async def on_new_call(
 
     Answers the call and starts the media streaming.
     """
+    from app.persistence.itelephony import ITelephony
+    from app.helpers.pydantic_types.phone_numbers import PhoneNumber as PhoneNumberType
+
     logger.debug("Incoming call handler")
 
-    streaming_options = MediaStreamingOptions(
-        audio_channel_type=MediaStreamingAudioChannelType.UNMIXED,
-        content_type=MediaStreamingContentType.AUDIO,
-        enable_bidirectional=True,
-        start_media_streaming=False,
-        transport_type=MediaStreamingTransportType.WEBSOCKET,
-        transport_url=wss_url,
-    )
-
     try:
-        answer_call_result = await client.answer_call(
+        call_connection_id, server_call_id = await telephony.answer_call(
             callback_url=callback_url,
-            cognitive_services_endpoint=CONFIG.cognitive_service.endpoint,
-            incoming_call_context=incoming_context,
-            media_streaming=streaming_options,
+            incoming_context=incoming_context,
+            phone_number=phone_number,
+            wss_url=wss_url,
         )
-        logger.info("Answered call (%s)", answer_call_result.call_connection_id)
+        logger.info("Answered call (%s)", call_connection_id)
         return True
 
-    except ClientAuthenticationError:
+    except Exception:
         logger.exception(
-            "Authentication error with Communication Services, check the credentials"
+            "Error answering call from %s",
+            phone_number,
         )
-
-    except HttpResponseError as e:
-        if "lifetime validation of the signed http request failed" in e.message.lower():
-            logger.debug("Old call event received, ignoring")
-        else:
-            logger.exception(
-                "Unknown error answering call with %s",
-                phone_number,
-            )
-
-    return False
+        return False
 
 
 @start_as_current_span("on_call_connected")
