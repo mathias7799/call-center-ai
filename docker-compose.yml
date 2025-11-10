@@ -1,0 +1,127 @@
+# Docker Compose for Local Development with SIP
+# This setup includes:
+# - Call Center AI application
+# - FreeSWITCH (SIP server for testing)
+# - Redis (cache)
+# - SQLite (embedded in app container)
+
+version: '3.8'
+
+services:
+  # FreeSWITCH - Open Source SIP Server
+  freeswitch:
+    image: signalwire/freeswitch:latest
+    container_name: call-center-freeswitch
+    hostname: freeswitch
+    ports:
+      - "5060:5060/udp"  # SIP UDP
+      - "5060:5060/tcp"   # SIP TCP
+      - "5080:5080/udp"  # SIP WebSocket
+      - "8021:8021/tcp"   # ESL (Event Socket Library)
+      - "10000-10100:10000-10100/udp"  # RTP media (limited range for local)
+    volumes:
+      - ./freeswitch/conf:/etc/freeswitch:ro
+      - freeswitch-sounds:/usr/share/freeswitch/sounds
+      - freeswitch-recordings:/var/lib/freeswitch/recordings
+    environment:
+      - SOUND_RATES=8000:16000:32000:48000
+    networks:
+      - call-center-network
+    healthcheck:
+      test: ["CMD", "fs_cli", "-x", "status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Redis - Cache and pub/sub
+  redis:
+    image: redis:7-alpine
+    container_name: call-center-redis
+    hostname: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - call-center-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    command: redis-server --appendonly yes
+
+  # Call Center AI Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    container_name: call-center-app
+    hostname: app
+    ports:
+      - "8080:8080"      # HTTP API
+      - "5061:5060/udp"  # SIP (if needed)
+      - "10100-10200:10000-10100/udp"  # RTP media
+    volumes:
+      # Mount source code for development (hot reload)
+      - ./app:/app/app:ro
+      - ./data:/app/data  # SQLite database
+      - ./logs:/app/logs  # Application logs
+    environment:
+      # Application settings
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+
+      # Config file
+      - CONFIG_FILE=/app/config-local-sip.yaml
+
+      # Twilio (for SMS)
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER:-}
+
+      # Azure OpenAI
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
+
+      # Azure AI Search
+      - AZURE_SEARCH_ENDPOINT=${AZURE_SEARCH_ENDPOINT}
+      - AZURE_SEARCH_API_KEY=${AZURE_SEARCH_API_KEY}
+      - AZURE_SEARCH_INDEX=${AZURE_SEARCH_INDEX:-call-center-index}
+
+      # Azure Speech Services
+      - AZURE_COGNITIVE_SERVICE_ENDPOINT=${AZURE_COGNITIVE_SERVICE_ENDPOINT}
+      - AZURE_COGNITIVE_SERVICE_API_KEY=${AZURE_COGNITIVE_SERVICE_API_KEY}
+
+      # Azure App Configuration (optional for local)
+      - AZURE_APP_CONFIGURATION_ENDPOINT=${AZURE_APP_CONFIGURATION_ENDPOINT:-}
+
+      # Monitoring (optional for local)
+      - APPLICATIONINSIGHTS_CONNECTION_STRING=${APPLICATIONINSIGHTS_CONNECTION_STRING:-}
+
+    depends_on:
+      freeswitch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - call-center-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8080/health', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+    driver: local
+  freeswitch-sounds:
+    driver: local
+  freeswitch-recordings:
+    driver: local
+
+networks:
+  call-center-network:
+    driver: bridge

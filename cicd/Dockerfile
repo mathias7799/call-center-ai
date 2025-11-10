@@ -1,11 +1,31 @@
 # Builder container (with UV as package manager)
 FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim@sha256:525eb0972b68435ca35014cf975e368b1a6cdd48fb0b5836866518b89863ca4c AS build
 
-# UV build dependencies
+# UV build dependencies + PJSIP dependencies
 RUN --mount=target=/var/lib/apt/lists,type=cache,id=apt-lists-${TARGETPLATFORM},sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends \
-        build-essential
+        build-essential \
+        git \
+        python3-dev \
+        libasound2-dev \
+        libssl-dev \
+        portaudio19-dev
+
+# Build and install PJSIP (for SIP telephony support)
+WORKDIR /tmp/pjsip-build
+RUN git clone --depth 1 --branch 2.14 https://github.com/pjsip/pjproject.git && \
+    cd pjproject && \
+    ./configure \
+        --enable-shared \
+        --disable-sound \
+        --disable-video \
+        --disable-opencore-amr \
+        CFLAGS="-O2" && \
+    make dep && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig
 
 # Copy project definitions
 WORKDIR /app
@@ -20,6 +40,21 @@ RUN --mount=target=/root/.cache/uv,type=cache,id=uv-${TARGETPLATFORM},sharing=lo
 # Output container (with only venv and app source)
 FROM python:3.13-slim-bookworm@sha256:ae9f9ac89467077ed1efefb6d9042132d28134ba201b2820227d46c9effd3174
 
+# Install runtime dependencies for PJSIP
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libasound2 \
+    libssl3 \
+    portaudio19-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy PJSIP libraries from builder
+COPY --from=build /usr/local/lib/libpj* /usr/local/lib/
+COPY --from=build /usr/local/lib/lib*codec* /usr/local/lib/
+COPY --from=build /usr/local/lib/libsrtp* /usr/local/lib/
+COPY --from=build /usr/local/lib/libresample* /usr/local/lib/
+COPY --from=build /usr/local/lib/libwebrtc* /usr/local/lib/
+RUN ldconfig
+
 # Set default dir
 WORKDIR /app
 
@@ -27,6 +62,7 @@ WORKDIR /app
 COPY . .
 COPY --from=build /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:${PATH}"
+ENV PYTHONUNBUFFERED=1
 
 # Allow app to know its version
 ARG VERSION

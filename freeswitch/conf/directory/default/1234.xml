@@ -1,0 +1,19 @@
+<!-- SIP Extension 1234 - AI Agent -->
+<include>
+  <user id="1234">
+    <params>
+      <param name="password" value="1234"/>
+      <param name="vm-password" value="1234"/>
+    </params>
+    <variables>
+      <variable name="toll_allow" value="domestic,international,local"/>
+      <variable name="accountcode" value="1234"/>
+      <variable name="user_context" value="default"/>
+      <variable name="effective_caller_id_name" value="AI Agent"/>
+      <variable name="effective_caller_id_number" value="1234"/>
+      <variable name="outbound_caller_id_name" value="$${outbound_caller_name}"/>
+      <variable name="outbound_caller_id_number" value="$${outbound_caller_id}"/>
+      <variable name="callgroup" value="agents"/>
+    </variables>
+  </user>
+</include>

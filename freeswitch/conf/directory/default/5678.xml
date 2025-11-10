@@ -1,0 +1,19 @@
+<!-- SIP Extension 5678 - Test Client -->
+<include>
+  <user id="5678">
+    <params>
+      <param name="password" value="5678"/>
+      <param name="vm-password" value="5678"/>
+    </params>
+    <variables>
+      <variable name="toll_allow" value="domestic,international,local"/>
+      <variable name="accountcode" value="5678"/>
+      <variable name="user_context" value="default"/>
+      <variable name="effective_caller_id_name" value="Test User"/>
+      <variable name="effective_caller_id_number" value="5678"/>
+      <variable name="outbound_caller_id_name" value="$${outbound_caller_name}"/>
+      <variable name="outbound_caller_id_number" value="$${outbound_caller_id}"/>
+      <variable name="callgroup" value="users"/>
+    </variables>
+  </user>
+</include>
