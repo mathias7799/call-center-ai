@@ -1,0 +1,177 @@
+# Makefile for Local SIP Testing
+# This supplements the main Makefile with SIP-specific commands
+
+.PHONY: help-local docker-up docker-down docker-logs install-pjsip sip-test sip-status clean-local
+
+help-local: ## Show local testing commands
+	@echo "Local SIP Testing Commands:"
+	@echo ""
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-25s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "Quick Start:"
+	@echo "  1. make docker-up          # Start all services"
+	@echo "  2. make sip-test-setup     # Setup SIP environment"
+	@echo "  3. Configure SIP softphone and call extension 1234"
+	@echo ""
+
+# Docker Commands
+docker-up: ## Start all services (app + FreeSWITCH + Redis)
+	@echo "🚀 Starting local SIP testing environment..."
+	docker-compose up -d
+	@echo "✅ Services started!"
+	@echo ""
+	@echo "Access points:"
+	@echo "  - Application: http://localhost:8080"
+	@echo "  - FreeSWITCH SIP: localhost:5060"
+	@echo "  - Redis: localhost:6379"
+
+docker-down: ## Stop all services
+	@echo "🛑 Stopping services..."
+	docker-compose down
+
+docker-logs: ## View application logs
+	docker-compose logs -f app
+
+docker-logs-freeswitch: ## View FreeSWITCH logs
+	docker-compose logs -f freeswitch
+
+docker-logs-all: ## View all service logs
+	docker-compose logs -f
+
+docker-restart: ## Restart application
+	docker-compose restart app
+
+docker-rebuild: ## Rebuild and restart application
+	docker-compose up -d --build app
+
+docker-clean: ## Remove all containers, volumes, and images
+	docker-compose down -v
+	docker rmi call-center-ai:local 2>/dev/null || true
+
+# PJSIP Installation
+install-pjsip: ## Install PJSIP from source (requires sudo)
+	@echo "📦 Installing PJSIP..."
+	@./scripts/install-pjsip.sh
+	@echo "✅ PJSIP installed!"
+
+test-pjsip: ## Test if PJSIP is installed correctly
+	@echo "🧪 Testing PJSIP installation..."
+	@python3 -c "import pjsua2; print('✅ PJSIP version:', pjsua2.Endpoint.version())" || \
+		echo "❌ PJSIP not installed. Run: make install-pjsip"
+
+# SIP Testing
+sip-test-setup: docker-up ## Setup complete SIP testing environment
+	@echo "⏳ Waiting for services to start..."
+	@sleep 8
+	@echo ""
+	@echo "✅ SIP Testing Environment Ready!"
+	@echo ""
+	@echo "📞 Configure your SIP softphone:"
+	@echo "   Server: localhost:5060"
+	@echo "   Username: 5678"
+	@echo "   Password: 5678"
+	@echo "   Transport: UDP"
+	@echo ""
+	@echo "📞 Call extension 1234 to reach the AI agent"
+	@echo ""
+	@echo "💡 Useful commands:"
+	@echo "   make sip-status        # Check SIP system status"
+	@echo "   make sip-test-call     # Make a test call via FreeSWITCH"
+	@echo "   make docker-logs       # View application logs"
+
+sip-test-call: ## Make a test SIP call from extension 5678 to 1234
+	@echo "📞 Making test call from 5678 to AI agent (1234)..."
+	@docker exec -it call-center-freeswitch fs_cli -x "originate user/5678 &bridge(user/1234)" || \
+		echo "❌ Failed to make call. Is FreeSWITCH running? (make docker-up)"
+
+sip-status: ## Check SIP system status
+	@echo "======================================"
+	@echo "🔍 SIP System Status"
+	@echo "======================================"
+	@echo ""
+	@echo "📊 FreeSWITCH Status:"
+	@docker exec call-center-freeswitch fs_cli -x "status" 2>/dev/null || echo "❌ FreeSWITCH not running"
+	@echo ""
+	@echo "📋 SIP Registrations:"
+	@docker exec call-center-freeswitch fs_cli -x "sofia status" 2>/dev/null || echo "❌ No registrations"
+	@echo ""
+	@echo "📞 Active Calls:"
+	@docker exec call-center-freeswitch fs_cli -x "show calls" 2>/dev/null || echo "No active calls"
+	@echo ""
+	@echo "🔊 Available Codecs:"
+	@docker exec call-center-freeswitch fs_cli -x "show codecs" 2>/dev/null | grep -E "(G711|G722|PCMU|PCMA)" || echo "Codec info unavailable"
+
+sip-shell: ## Open FreeSWITCH CLI shell
+	@echo "Opening FreeSWITCH CLI (type 'help' for commands, Ctrl+D to exit)..."
+	@docker exec -it call-center-freeswitch fs_cli
+
+# Health Checks
+health: ## Check health of all services
+	@echo "🏥 Health Check"
+	@echo "=============="
+	@echo ""
+	@echo -n "Application:  "
+	@curl -s http://localhost:8080/health > /dev/null 2>&1 && echo "✅ Healthy" || echo "❌ Unhealthy"
+	@echo -n "FreeSWITCH:   "
+	@docker exec call-center-freeswitch fs_cli -x "status" > /dev/null 2>&1 && echo "✅ Running" || echo "❌ Not running"
+	@echo -n "Redis:        "
+	@docker exec call-center-redis redis-cli ping > /dev/null 2>&1 && echo "✅ Running" || echo "❌ Not running"
+
+# Cleanup
+clean-local: ## Clean up local development files
+	@echo "🧹 Cleaning up..."
+	rm -rf data/*.db
+	rm -rf logs/*.log
+	rm -rf __pycache__
+	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	find . -type f -name "*.pyc" -delete
+	@echo "✅ Cleanup complete"
+
+# Development
+dev-local: ## Run application locally (not in Docker)
+	@echo "🚀 Starting application locally..."
+	@echo "⚠️  Make sure FreeSWITCH and Redis are running (make docker-up)"
+	VERSION=dev PUBLIC_DOMAIN=http://localhost:8080 uv run granian \
+		--host 0.0.0.0 \
+		--interface asgi \
+		--log-level debug \
+		--port 8080 \
+		--reload \
+		--workers 1 \
+		app.main:api
+
+# Documentation
+docs-local: ## Open local testing documentation
+	@echo "📚 Local Testing Documentation:"
+	@echo ""
+	@echo "  LOCAL_TESTING_GUIDE.md - Complete local testing guide"
+	@echo "  SIP_IMPLEMENTATION_GUIDE.md - Technical implementation details"
+	@echo "  SIP_STATUS.md - Implementation status"
+	@echo "  EXAMPLES.md - Code examples and tutorials"
+	@echo ""
+
+# Quick Commands
+quick-start: install-pjsip docker-up sip-test-setup ## Complete quick start setup
+	@echo ""
+	@echo "🎉 Quick start complete!"
+	@echo ""
+	@echo "Next steps:"
+	@echo "  1. Copy .env.example to .env"
+	@echo "  2. Fill in your Azure credentials"
+	@echo "  3. Configure a SIP softphone"
+	@echo "  4. Call extension 1234"
+	@echo ""
+
+quick-test: ## Quick test of SIP telephony
+	@echo "🧪 Running quick tests..."
+	@echo ""
+	@echo "1️⃣ Testing codec conversion..."
+	@python3 -c "from app.persistence.sip.codecs import CodecConverter; c=CodecConverter(); assert c.g711_ulaw_encode(b'\\x00'*320); print('✅ Codecs working')"
+	@echo ""
+	@echo "2️⃣ Testing FreeSWITCH..."
+	@make sip-status > /dev/null && echo "✅ FreeSWITCH working" || echo "❌ FreeSWITCH not working"
+	@echo ""
+	@echo "3️⃣ Testing application..."
+	@curl -sf http://localhost:8080/health > /dev/null && echo "✅ Application working" || echo "❌ Application not working"
+	@echo ""
+	@echo "✅ Quick test complete!"
