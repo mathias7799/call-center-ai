@@ -89,7 +89,7 @@ async def on_new_call(
 @start_as_current_span("on_call_connected")
 async def on_call_connected(
     call: CallStateModel,
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     scheduler: Scheduler,
     server_call_id: str,
 ) -> None:
@@ -98,18 +98,20 @@ async def on_call_connected(
 
     Ask for the language and start recording the call.
     """
+    from app.persistence.itelephony import ITelephony
+
     logger.info("Call connected, asking for language")
 
     # Execute business logic
     await asyncio.gather(
         _handle_ivr_language(
             call=call,
-            client=client,
+            telephony=telephony,
             scheduler=scheduler,
         ),  # First, every time a call is answered, confirm the language
         _handle_recording(
             call=call,
-            client=client,
+            telephony=telephony,
             server_call_id=server_call_id,
         ),  # Second, start recording the call
     )
@@ -133,7 +135,7 @@ async def on_call_connected(
 @start_as_current_span("on_call_disconnected")
 async def on_call_disconnected(
     call: CallStateModel,
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     post_callback: Callable[[CallStateModel], Awaitable[None]],
     scheduler: Scheduler,
 ) -> None:
@@ -142,10 +144,12 @@ async def on_call_disconnected(
 
     Hangs up the call and stores the final message.
     """
+    from app.persistence.itelephony import ITelephony
+
     logger.info("Call disconnected")
     await hangup_now(
         call=call,
-        client=client,
+        telephony=telephony,
         post_callback=post_callback,
         scheduler=scheduler,
     )
@@ -157,7 +161,7 @@ async def on_audio_connected(  # noqa: PLR0913
     audio_out: asyncio.Queue[bytes | bool],
     audio_sample_rate: int,
     call: CallStateModel,
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     post_callback: Callable[[CallStateModel], Awaitable[None]],
     training_callback: Callable[[CallStateModel], Awaitable[None]],
     scheduler: Scheduler,
@@ -167,11 +171,13 @@ async def on_audio_connected(  # noqa: PLR0913
 
     Starts the real-time conversation with the LLM.
     """
+    from app.persistence.itelephony import ITelephony
+
     await load_llm_chat(
         audio_in=audio_in,
         audio_out=audio_out,
         audio_sample_rate=audio_sample_rate,
-        automation_client=client,
+        telephony=telephony,
         call=call,
         post_callback=post_callback,
         scheduler=scheduler,
@@ -182,7 +188,7 @@ async def on_audio_connected(  # noqa: PLR0913
 @start_as_current_span("on_automation_recognize_error")
 async def on_automation_recognize_error(
     call: CallStateModel,
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     contexts: set[CallContextEnum] | None,
     post_callback: Callable[[CallStateModel], Awaitable[None]],
     scheduler: Scheduler,
@@ -192,6 +198,8 @@ async def on_automation_recognize_error(
 
     If the call should continue, increments the recognition retry counter and plays a timeout prompt. Else, hangs up the call.
     """
+    from app.persistence.itelephony import ITelephony
+
     if not await _pre_recognize_error(
         call=call,
         scheduler=scheduler,
@@ -199,7 +207,7 @@ async def on_automation_recognize_error(
         # Play TTS
         await handle_automation_tts(
             call=call,
-            client=client,
+            telephony=telephony,
             context=CallContextEnum.GOODBYE,
             post_callback=post_callback,
             scheduler=scheduler,
@@ -223,7 +231,7 @@ async def on_automation_recognize_error(
     )
     await _handle_ivr_language(
         call=call,
-        client=client,
+        telephony=telephony,
         scheduler=scheduler,
     )
 
@@ -231,7 +239,7 @@ async def on_automation_recognize_error(
 @start_as_current_span("on_realtime_recognize_error")
 async def on_realtime_recognize_error(
     call: CallStateModel,
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     post_callback: Callable[[CallStateModel], Awaitable[None]],
     scheduler: Scheduler,
     tts_client: SpeechSynthesizer,
@@ -247,7 +255,7 @@ async def on_realtime_recognize_error(
     ):
         await hangup_realtime_now(
             call=call,
-            client=client,
+            telephony=telephony,
             post_callback=post_callback,
             scheduler=scheduler,
             tts_client=tts_client,
@@ -266,7 +274,7 @@ async def on_realtime_recognize_error(
 
 async def hangup_realtime_now(
     call: CallStateModel,
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     post_callback: Callable[[CallStateModel], Awaitable[None]],
     scheduler: Scheduler,
     tts_client: SpeechSynthesizer,
@@ -287,7 +295,7 @@ async def hangup_realtime_now(
     # Hangup
     await hangup_now(
         call=call,
-        client=client,
+        telephony=telephony,
         post_callback=post_callback,
         scheduler=scheduler,
     )
@@ -345,7 +353,7 @@ async def on_play_started(
 @start_as_current_span("on_play_completed")
 async def on_automation_play_completed(
     call: CallStateModel,
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     contexts: set[CallContextEnum] | None,
     post_callback: Callable[[CallStateModel], Awaitable[None]],
     scheduler: Scheduler,
@@ -379,7 +387,7 @@ async def on_automation_play_completed(
         logger.info("Ending call")
         await hangup_now(
             call=call,
-            client=client,
+            telephony=telephony,
             post_callback=post_callback,
             scheduler=scheduler,
         )
@@ -424,7 +432,7 @@ async def on_play_error(error_code: int) -> None:
 @start_as_current_span("on_ivr_recognized")
 async def on_ivr_recognized(
     call: CallStateModel,
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     label: str,
     scheduler: Scheduler,
 ) -> None:
@@ -459,14 +467,14 @@ async def on_ivr_recognized(
 
     await start_audio_streaming(
         call=call,
-        client=client,
+        telephony=telephony,
     )
 
 
 @start_as_current_span("on_transfer_error")
 async def on_transfer_error(
     call: CallStateModel,
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     error_code: int,
     post_callback: Callable[[CallStateModel], Awaitable[None]],
     scheduler: Scheduler,
@@ -479,7 +487,7 @@ async def on_transfer_error(
     logger.info("Error during call transfer, subCode %s", error_code)
     await handle_automation_tts(
         call=call,
-        client=client,
+        telephony=telephony,
         context=CallContextEnum.TRANSFER_FAILED,
         post_callback=post_callback,
         scheduler=scheduler,
@@ -528,7 +536,7 @@ async def on_sms_received(
         # TODO: Reimplement SMS answers in voice
         # await load_llm_chat(
         #     call=call,
-        #     client=client,
+        #     telephony=telephony,
         #     post_callback=post_callback,
         # )
 
@@ -537,7 +545,7 @@ async def on_sms_received(
 
 async def hangup_now(
     call: CallStateModel,
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     post_callback: Callable[[CallStateModel], Awaitable[None]],
     scheduler: Scheduler,
 ) -> None:
@@ -560,7 +568,7 @@ async def hangup_now(
             )
 
     await asyncio.gather(
-        handle_hangup(client=client, call=call),
+        handle_hangup(telephony=telephony, call=call),
         _store(call),
         post_callback(call),
     )
@@ -727,7 +735,7 @@ async def _intelligence_next(
 
 async def _handle_ivr_language(
     call: CallStateModel,
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     scheduler: Scheduler,
 ) -> None:
     """
@@ -741,7 +749,7 @@ async def _handle_ivr_language(
         logger.info("Only one language available, selecting %s by default", short_code)
         await on_ivr_recognized(
             call=call,
-            client=client,
+            telephony=telephony,
             label=short_code,
             scheduler=scheduler,
         )
@@ -770,7 +778,7 @@ async def _handle_ivr_language(
     await handle_recognize_ivr(
         call=call,
         choices=choices,
-        client=client,
+        telephony=telephony,
         context=CallContextEnum.IVR_LANG_SELECT,
         text=await CONFIG.prompts.tts.ivr_language(call),
     )
@@ -778,7 +786,7 @@ async def _handle_ivr_language(
 
 async def _handle_recording(
     call: CallStateModel,
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     server_call_id: str,
 ) -> None:
     """

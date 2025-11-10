@@ -52,7 +52,7 @@ class DefaultPlugin(AbstractPlugin):
 
         await hangup_realtime_now(
             call=self.call,
-            client=self.client,
+            telephony=self.telephony,
             post_callback=self.post_callback,
             scheduler=self.scheduler,
             tts_client=self.tts_client,
@@ -279,7 +279,7 @@ class DefaultPlugin(AbstractPlugin):
         # Transfer
         await handle_transfer(
             call=self.call,
-            client=self.client,
+            telephony=self.telephony,
             target=self.call.initiate.agent_phone_number,
         )
         return "Transferring to human agent"

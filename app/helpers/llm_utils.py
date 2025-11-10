@@ -18,7 +18,11 @@ from azure.ai.inference.models import ChatCompletionsToolDefinition, FunctionDef
 from azure.cognitiveservices.speech import (
     SpeechSynthesizer,
 )
-from azure.communication.callautomation.aio import CallAutomationClient
+# CallAutomationClient import removed - using ITelephony interface instead
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.persistence.itelephony import ITelephony
 from jinja2 import Environment
 from json_repair import repair_json
 from pydantic import BaseModel, TypeAdapter
@@ -50,7 +54,7 @@ class Parameters(BaseModel):
 
 class AbstractPlugin:
     call: CallStateModel
-    client: CallAutomationClient
+    telephony: "ITelephony"
     post_callback: Callable[[CallStateModel], Awaitable[None]]
     scheduler: Scheduler
     tts_callback: Callable[[str], Awaitable[None]]
@@ -59,14 +63,14 @@ class AbstractPlugin:
     def __init__(  # noqa: PLR0913
         self,
         call: CallStateModel,
-        client: CallAutomationClient,
+        telephony: "ITelephony",
         post_callback: Callable[[CallStateModel], Awaitable[None]],
         scheduler: Scheduler,
         tts_callback: Callable[[str], Awaitable[None]],
         tts_client: SpeechSynthesizer,
     ):
         self.call = call
-        self.client = client
+        self.telephony = telephony
         self.post_callback = post_callback
         self.scheduler = scheduler
         self.tts_callback = tts_callback
@@ -224,6 +228,8 @@ def add_customer_response(
             return res
 
         # Update the signature of the function
+        # Build examples string outside of f-string to avoid backslash issues
+        examples_str = "\n- ".join(response_examples)
         func.__signature__ = inspect.signature(func).replace(
             parameters=[
                 *inspect.signature(func).parameters.values(),
@@ -241,7 +247,7 @@ def add_customer_response(
                         - Use simple language
 
                         # Examples
-                        {"\n- ".join(response_examples)}
+                        {examples_str}
                         """,
                     ],
                 ),

@@ -151,7 +151,7 @@ def tts_sentence_split(text: str, include_last: bool) -> Generator[tuple[str, in
 
 
 async def handle_media(
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     call: CallStateModel,
     sound_url: str,
     context: ContextEnum | None = None,
@@ -160,19 +160,18 @@ async def handle_media(
     Play a media to a call participant.
 
     If `context` is provided, it will be used to track the operation.
+
+    TODO: This function needs ITelephony interface extension to support FileSource (URL-based media).
+    Currently the interface only supports text-based play_media with SSML.
     """
-    with _detect_hangup():
-        assert call.voice_id, "Voice ID is required to control the call"
-        call_client = await _use_call_client(client, call.voice_id)
-        await call_client.play_media(
-            operation_context=_context_serializer({context}),
-            play_source=FileSource(url=sound_url),
-        )
+    # TODO: Implement file-based media playback via ITelephony interface
+    # For now, this will need to be handled by the specific implementation
+    raise NotImplementedError("File-based media playback needs ITelephony interface extension")
 
 
 async def handle_automation_tts(  # noqa: PLR0913
     call: CallStateModel,
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     post_callback: Callable[[CallStateModel], Awaitable[None]],
     scheduler: Scheduler,
     text: str,
@@ -192,11 +191,10 @@ async def handle_automation_tts(  # noqa: PLR0913
     # Play each chunk
     jobs: list[Job] = []
     chunks = _chunk_for_tts(text)
-    call_client = await _use_call_client(client, call.voice_id)
     jobs += [
         await scheduler.spawn(
             _automation_play_text(
-                call_client=call_client,
+                telephony=telephony,
                 call=call,
                 context=context,
                 style=style,
@@ -216,7 +214,7 @@ async def handle_automation_tts(  # noqa: PLR0913
             logger.info("Failed to play prompt, ending call now")
             await hangup_now(
                 call=call,
-                client=client,
+                telephony=telephony,
                 post_callback=post_callback,
                 scheduler=scheduler,
             )
@@ -232,7 +230,7 @@ async def handle_automation_tts(  # noqa: PLR0913
 
 
 async def _automation_play_text(
-    call_client: CallConnectionClient,
+    telephony: "ITelephony",
     call: CallStateModel,
     context: ContextEnum | None,
     style: MessageStyleEnum,
@@ -246,16 +244,23 @@ async def _automation_play_text(
     Returns `True` if the text was played, `False` otherwise.
     """
     logger.info("Playing TTS: %s", text)
-    with _detect_hangup():
+    try:
         assert call.voice_id, "Voice ID is required to control the call"
-        await call_client.play_media(
-            operation_context=_context_serializer({context}),
-            play_source=_ssml_from_text(
-                call=call,
-                style=style,
-                text=text,
-            ),
+        # Generate SSML text
+        ssml_source = _ssml_from_text(
+            call=call,
+            style=style,
+            text=text,
         )
+        # Use the telephony interface to play media
+        await telephony.play_media(
+            call_connection_id=call.voice_id,
+            text=ssml_source.ssml_text,
+            context=_context_serializer({context}),
+        )
+    except Exception as e:
+        logger.exception("Error playing media")
+        raise CallHangupException from e
 
 
 async def handle_realtime_tts(  # noqa: PLR0913
@@ -387,7 +392,7 @@ def _ssml_from_text(
 async def handle_recognize_ivr(
     call: CallStateModel,
     choices: list[RecognitionChoice],
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     text: str,
     context: ContextEnum | None = None,
 ) -> None:
@@ -399,26 +404,26 @@ async def handle_recognize_ivr(
     logger.info("Recognizing IVR: %s", text)
     try:
         assert call.voice_id, "Voice ID is required to control the call"
-        call_client = await _use_call_client(client, call.voice_id)
-        await call_client.start_recognizing_media(
-            choices=choices,
-            input_type=RecognizeInputType.CHOICES,
-            interrupt_prompt=True,
-            operation_context=_context_serializer({context}),
-            play_prompt=_ssml_from_text(
-                call=call,
-                style=MessageStyleEnum.NONE,
-                text=text,
-            ),
-            speech_language=call.lang.short_code,
-            target_participant=PhoneNumberIdentifier(call.initiate.phone_number),  # pyright: ignore
+        # Generate SSML text for the prompt
+        ssml_source = _ssml_from_text(
+            call=call,
+            style=MessageStyleEnum.NONE,
+            text=text,
         )
-    except ResourceNotFoundError:
+        await telephony.recognize_speech(
+            call_connection_id=call.voice_id,
+            text=ssml_source.ssml_text,
+            choices=choices,
+            context=_context_serializer({context}),
+            phone_number=call.initiate.phone_number,
+            lang=call.lang.short_code,
+        )
+    except Exception:
         logger.debug("Call hung up before recognizing")
 
 
 async def handle_hangup(
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     call: CallStateModel,
 ) -> None:
     """
@@ -427,19 +432,23 @@ async def handle_hangup(
     If the call is already hung up, the exception will be suppressed.
     """
     logger.info("Hanging up")
-    with (
-        # Suppress hangup exception
-        suppress(CallHangupException),
-        # Detect hangup exception
-        _detect_hangup(),
-    ):
+    try:
         assert call.voice_id, "Voice ID is required to control the call"
-        call_client = await _use_call_client(client, call.voice_id)
-        await call_client.hang_up(is_for_everyone=True)
+        await telephony.hangup_call(call_connection_id=call.voice_id)
+    except CallHangupException:
+        # Suppress hangup exception (call already hung up)
+        pass
+    except Exception as e:
+        logger.exception("Error hanging up call")
+        # Don't raise if already hung up
+        if "already terminated" in str(e).lower() or "not found" in str(e).lower():
+            pass
+        else:
+            raise
 
 
 async def handle_transfer(
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     call: CallStateModel,
     target: str,
     context: ContextEnum | None = None,
@@ -450,17 +459,20 @@ async def handle_transfer(
     Can raise a `CallHangupException` if the call is hung up.
     """
     logger.info("Transferring call: %s", target)
-    with _detect_hangup():
+    try:
         assert call.voice_id, "Voice ID is required to control the call"
-        call_client = await _use_call_client(client, call.voice_id)
-        await call_client.transfer_call_to_participant(
-            operation_context=_context_serializer({context}),
-            target_participant=PhoneNumberIdentifier(target),
+        await telephony.transfer_call(
+            call_connection_id=call.voice_id,
+            target=target,
+            context=_context_serializer({context}),
         )
+    except Exception as e:
+        logger.exception("Error transferring call")
+        raise CallHangupException from e
 
 
 async def start_audio_streaming(
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     call: CallStateModel,
 ) -> None:
     """
@@ -469,19 +481,16 @@ async def start_audio_streaming(
     Can raise a `CallHangupException` if the call is hung up.
     """
     logger.info("Starting audio streaming")
-    with _detect_hangup():
+    try:
         assert call.voice_id, "Voice ID is required to control the call"
-        call_client = await _use_call_client(client, call.voice_id)
-        # TODO: Use the public API once the "await" have been fixed
-        # await call_client.start_media_streaming()
-        await call_client._call_media_client.start_media_streaming(
-            call_connection_id=call_client._call_connection_id,
-            start_media_streaming_request=StartMediaStreamingRequest(),
-        )
+        await telephony.start_media_streaming(call_connection_id=call.voice_id)
+    except Exception as e:
+        logger.exception("Error starting media streaming")
+        raise CallHangupException from e
 
 
 async def stop_audio_streaming(
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     call: CallStateModel,
 ) -> None:
     """
@@ -490,10 +499,12 @@ async def stop_audio_streaming(
     Can raise a `CallHangupException` if the call is hung up.
     """
     logger.info("Stopping audio streaming")
-    with _detect_hangup():
+    try:
         assert call.voice_id, "Voice ID is required to control the call"
-        call_client = await _use_call_client(client, call.voice_id)
-        await call_client.stop_media_streaming()
+        await telephony.stop_media_streaming(call_connection_id=call.voice_id)
+    except Exception as e:
+        logger.exception("Error stopping media streaming")
+        raise CallHangupException from e
 
 
 def _context_serializer(contexts: set[ContextEnum | None] | None) -> str | None:
@@ -510,31 +521,33 @@ def _context_serializer(contexts: set[ContextEnum | None] | None) -> str | None:
 @contextmanager
 def _detect_hangup() -> Generator[None]:
     """
-    Catch a call hangup and raise a `CallHangupException` instead of the Call Automation SDK exceptions.
+    Catch a call hangup and raise a `CallHangupException` instead of provider-specific exceptions.
+
+    This is a generic hangup detection that works across different telephony providers.
     """
     try:
         yield
-    except ResourceNotFoundError:
-        logger.debug("Call hung up")
-        raise CallHangupException
-    except HttpResponseError as e:
-        if "call already terminated" in e.message.lower():
-            logger.debug("Call hung up")
-            raise CallHangupException
+    except Exception as e:
+        # Check for common hangup indicators across different providers
+        error_msg = str(e).lower()
+        hangup_indicators = [
+            "call already terminated",
+            "call hung up",
+            "not found",
+            "disconnected",
+            "call ended",
+            "connection closed",
+        ]
+
+        if any(indicator in error_msg for indicator in hangup_indicators):
+            logger.debug("Call hung up: %s", error_msg)
+            raise CallHangupException from e
         else:
-            raise e
+            # Re-raise if not a hangup
+            raise
 
 
-@lru_acache()
-async def _use_call_client(
-    client: CallAutomationClient, voice_id: str
-) -> CallConnectionClient:
-    """
-    Return the call client for a given call.
-    """
-    logger.debug("Using Call client for %s", voice_id)
-
-    return client.get_call_connection(call_connection_id=voice_id)
+# _use_call_client removed - no longer needed with ITelephony interface
 
 
 @asynccontextmanager

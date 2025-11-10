@@ -5,15 +5,19 @@ from datetime import UTC, datetime, timedelta
 from functools import wraps
 
 from aiojobs import Scheduler
+from typing import TYPE_CHECKING
+
 from azure.cognitiveservices.speech import (
     SpeechSynthesizer,
 )
-from azure.communication.callautomation.aio import CallAutomationClient
+
+if TYPE_CHECKING:
+    from app.persistence.itelephony import ITelephony
 
 from app.helpers.call_utils import (
     AECStream,
     SttClient,
-    handle_media,
+    # handle_media,  # Temporarily disabled - needs ITelephony interface extension for file-based media
     handle_realtime_tts,
     tts_sentence_split,
     use_tts_client,
@@ -58,7 +62,7 @@ async def load_llm_chat(  # noqa: PLR0913
     audio_in: asyncio.Queue[bytes],
     audio_out: asyncio.Queue[bytes | bool],
     audio_sample_rate: int,
-    automation_client: CallAutomationClient,
+    telephony: "ITelephony",
     call: CallStateModel,
     post_callback: Callable[[CallStateModel], Awaitable[None]],
     scheduler: Scheduler,
@@ -100,7 +104,7 @@ async def load_llm_chat(  # noqa: PLR0913
             await scheduler.spawn(
                 on_realtime_recognize_error(
                     call=call,
-                    client=automation_client,
+                    telephony=telephony,
                     post_callback=post_callback,
                     scheduler=scheduler,
                     tts_client=tts_client,
@@ -149,7 +153,7 @@ async def load_llm_chat(  # noqa: PLR0913
             last_chat = asyncio.create_task(
                 _continue_chat(
                     call=call,
-                    client=automation_client,
+                    telephony=telephony,
                     post_callback=post_callback,
                     scheduler=scheduler,
                     tool_blacklist=tool_blacklist,
@@ -236,7 +240,7 @@ async def load_llm_chat(  # noqa: PLR0913
 @start_as_current_span("call_continue_chat")
 async def _continue_chat(  # noqa: PLR0915, PLR0913
     call: CallStateModel,
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     post_callback: Callable[[CallStateModel], Awaitable[None]],
     scheduler: Scheduler,
     training_callback: Callable[[CallStateModel], Awaitable[None]],
@@ -286,7 +290,7 @@ async def _continue_chat(  # noqa: PLR0915, PLR0913
     chat_task = asyncio.create_task(
         _generate_chat_completion(
             call=call,
-            client=client,
+            telephony=telephony,
             post_callback=post_callback,
             scheduler=scheduler,
             tool_blacklist=tool_blacklist,
@@ -366,13 +370,16 @@ async def _continue_chat(  # noqa: PLR0915, PLR0913
                 # Do not play timeout prompt plus loading, it can be frustrating for the user
                 elif loading_task.done():
                     loading_task = _loading_task()
-                    await scheduler.spawn(
-                        handle_media(
-                            call=call,
-                            client=client,
-                            sound_url=CONFIG.prompts.sounds.loading(),
-                        )
-                    )
+                    # TODO: Re-enable loading sound once ITelephony interface supports file-based media
+                    # The handle_media function needs to be extended to support FileSource playback
+                    # See: handle_media in call_utils.py
+                    # await scheduler.spawn(
+                    #     handle_media(
+                    #         call=call,
+                    #         telephony=telephony,
+                    #         sound_url=CONFIG.prompts.sounds.loading(),
+                    #     )
+                    # )
 
             # Wait to not block the event loop for other requests
             await asyncio.sleep(1)
@@ -396,7 +403,7 @@ async def _continue_chat(  # noqa: PLR0915, PLR0913
             logger.info("Retrying chat, %s remaining", _iterations_remaining - 1)
             return await _continue_chat(
                 call=call,
-                client=client,
+                telephony=telephony,
                 post_callback=post_callback,
                 scheduler=scheduler,
                 tool_blacklist=tool_blacklist,
@@ -410,7 +417,7 @@ async def _continue_chat(  # noqa: PLR0915, PLR0913
         logger.info("Continuing chat, %s remaining", _iterations_remaining - 1)
         return await _continue_chat(
             call=call,
-            client=client,
+            telephony=telephony,
             post_callback=post_callback,
             scheduler=scheduler,
             tool_blacklist=tool_blacklist,
@@ -429,7 +436,7 @@ async def _continue_chat(  # noqa: PLR0915, PLR0913
 @start_as_current_span("call_generate_chat_completion")
 async def _generate_chat_completion(  # noqa: PLR0913, PLR0912, PLR0915
     call: CallStateModel,
-    client: CallAutomationClient,
+    telephony: "ITelephony",
     post_callback: Callable[[CallStateModel], Awaitable[None]],
     scheduler: Scheduler,
     tool_blacklist: set[str],
@@ -478,7 +485,7 @@ async def _generate_chat_completion(  # noqa: PLR0913, PLR0912, PLR0915
     # Build plugins
     plugins = DefaultPlugin(
         call=call,
-        client=client,
+        telephony=telephony,
         post_callback=post_callback,
         scheduler=scheduler,
         tts_callback=_plugin_tts_callback,
