@@ -101,8 +101,6 @@ services:
       - APPLICATIONINSIGHTS_CONNECTION_STRING=${APPLICATIONINSIGHTS_CONNECTION_STRING:-}
 
     depends_on:
-      freeswitch:
-        condition: service_healthy
       redis:
         condition: service_healthy
     networks:
