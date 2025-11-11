@@ -5,12 +5,10 @@
 # - Redis (cache)
 # - SQLite (embedded in app container)
 
-version: '3.8'
-
 services:
   # FreeSWITCH - Open Source SIP Server
   freeswitch:
-    image: signalwire/freeswitch:latest
+    image: drachtio/drachtio-freeswitch-mrf:latest
     container_name: call-center-freeswitch
     hostname: freeswitch
     ports:

@@ -71,6 +71,5 @@ CMD ["granian", \
     "--host", "0.0.0.0", \
     "--port", "8080", \
     "--log-level", "info", \
-    "--reload", \
     "--workers", "1", \
     "app.main:api"]
