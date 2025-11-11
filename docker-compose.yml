@@ -21,12 +21,12 @@ services:
       - "8081:8081/tcp"   # WebSocket (mod_verto)
       - "16384-20000:16384-20000/udp"  # RTP media
     volumes:
-      - ./freeswitch-conf:/usr/local/freeswitch/conf
       - ./freeswitch-logs:/usr/local/freeswitch/log
       - freeswitch-recordings:/usr/local/freeswitch/recordings
     networks:
       - call-center-network
     restart: unless-stopped
+    stop_grace_period: 10s
     healthcheck:
       test: ["CMD", "fs_cli", "-x", "status"]
       interval: 30s

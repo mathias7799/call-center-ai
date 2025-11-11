@@ -78,6 +78,7 @@ RUN mkdir -p /usr/local/freeswitch/conf \
 
 # Copy default configuration if it exists
 RUN if [ -d /usr/src/freeswitch/conf ]; then \
+        cp -r /usr/src/freeswitch/conf/vanilla/* /usr/local/freeswitch/conf/ || \
         cp -r /usr/src/freeswitch/conf/* /usr/local/freeswitch/conf/; \
     fi
 
@@ -86,5 +87,8 @@ WORKDIR /usr/local/freeswitch
 # Expose ports
 EXPOSE 5060/udp 5060/tcp 5080/udp 5080/tcp 8021/tcp 8081/tcp 7443/tcp 16384-32768/udp
 
-# Start FreeSWITCH
-CMD ["freeswitch", "-nc", "-nonat", "-conf", "/usr/local/freeswitch/conf", "-log", "/usr/local/freeswitch/log", "-db", "/usr/local/freeswitch/db"]
+# Handle shutdown signals properly
+STOPSIGNAL SIGTERM
+
+# Start FreeSWITCH in foreground mode (not as daemon)
+CMD ["freeswitch", "-nonat", "-nf"]
