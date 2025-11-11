@@ -100,19 +100,24 @@ class SpanMeterEnum(str, Enum):
         )
 
 
-try:
-    # Capture LLM prompt and completion contents
-    # See: https://learn.microsoft.com/en-us/azure/ai-studio/how-to/develop/trace-local-sdk?tabs=python#configuration
-    environ["AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"] = "true"
-    # Configure Azure Application Insights exporter
-    configure_azure_monitor()
-    # Instrument aiohttp
-    AioHttpClientInstrumentor().instrument()
-except ValueError as e:
-    print(  # noqa: T201
-        "Azure Application Insights instrumentation failed, likely due to a missing APPLICATIONINSIGHTS_CONNECTION_STRING environment variable.",
-        e,
-    )
+# Only configure Application Insights if connection string is provided
+if environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING"):
+    try:
+        # Capture LLM prompt and completion contents
+        # See: https://learn.microsoft.com/en-us/azure/ai-studio/how-to/develop/trace-local-sdk?tabs=python#configuration
+        environ["AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"] = "true"
+        # Configure Azure Application Insights exporter
+        configure_azure_monitor()
+        # Instrument aiohttp
+        AioHttpClientInstrumentor().instrument()
+        print("Azure Application Insights monitoring enabled")  # noqa: T201
+    except ValueError as e:
+        print(  # noqa: T201
+            "Azure Application Insights instrumentation failed:",
+            e,
+        )
+else:
+    print("Azure Application Insights monitoring disabled (no connection string provided)")  # noqa: T201
 
 # Attributes
 _default_attributes = {
