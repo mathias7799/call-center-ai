@@ -82,12 +82,9 @@ conversation:
   initiate:
     bot_company: "Contoso"
     bot_name: "Eva"
+    # lang has good defaults, just specify the short code
     lang:
       default_short_code: "en-US"
-      availables:
-        - short_code: "en-US"
-          voice: "en-US-AndrewNeural"
-          pronunciations_en: ["English", "EN", "United States"]
 
 # === OPTIONAL Services (not used for SIP testing) ===
 
