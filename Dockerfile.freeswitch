@@ -1,0 +1,90 @@
+# FreeSWITCH built from source
+# Based on: https://medium.com/@anilsingh_34221/installing-freeswitch-from-source-using-docker-and-docker-compose-22b0cb52a5a9
+
+FROM ubuntu:22.04
+
+LABEL maintainer="Call Center AI"
+LABEL description="FreeSWITCH build from source for SIP telephony testing"
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/pkgconfig
+ENV PATH="/usr/local/freeswitch/bin:$PATH"
+
+# Base build tools
+RUN apt-get update && apt-get install -y \
+    build-essential cmake git wget curl pkg-config \
+    libtool libtool-bin autoconf automake bash \
+    software-properties-common ca-certificates gnupg
+
+# Core dependencies
+RUN apt-get install -y \
+    libssl-dev libsqlite3-dev libcurl4-openssl-dev libpcre2-dev \
+    libspeex-dev libspeexdsp-dev libsofia-sip-ua-dev libldns-dev \
+    uuid-dev libpq-dev libopus-dev libsndfile1-dev libavformat-dev \
+    libavcodec-dev libavutil-dev libswscale-dev libjpeg-dev libtiff-dev \
+    libedit-dev liblua5.3-dev yasm nasm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build libks
+RUN git clone https://github.com/signalwire/libks.git /usr/src/libks && \
+    cd /usr/src/libks && \
+    cmake . && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig
+
+# Build signalwire-c
+RUN git clone https://github.com/signalwire/signalwire-c.git /usr/src/signalwire-c && \
+    cd /usr/src/signalwire-c && \
+    cmake . && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig
+
+# Build spandsp from source
+RUN git clone https://github.com/freeswitch/spandsp.git /usr/src/spandsp && \
+    cd /usr/src/spandsp && \
+    ./bootstrap.sh && \
+    ./configure && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig
+
+# Build sofia-sip from source
+RUN git clone https://github.com/freeswitch/sofia-sip.git /usr/src/sofia-sip && \
+    cd /usr/src/sofia-sip && \
+    ./bootstrap.sh && \
+    ./configure && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig
+
+# Clone and build FreeSWITCH
+RUN git clone https://github.com/signalwire/freeswitch.git /usr/src/freeswitch && \
+    cd /usr/src/freeswitch && \
+    chmod +x bootstrap.sh && \
+    bash ./bootstrap.sh -j && \
+    ./configure && \
+    make -j$(nproc) && \
+    make install && \
+    make sounds-install && \
+    make moh-install
+
+# Create necessary directories
+RUN mkdir -p /usr/local/freeswitch/conf \
+    /usr/local/freeswitch/log \
+    /usr/local/freeswitch/db \
+    /usr/local/freeswitch/recordings
+
+# Copy default configuration if it exists
+RUN if [ -d /usr/src/freeswitch/conf ]; then \
+        cp -r /usr/src/freeswitch/conf/* /usr/local/freeswitch/conf/; \
+    fi
+
+WORKDIR /usr/local/freeswitch
+
+# Expose ports
+EXPOSE 5060/udp 5060/tcp 5080/udp 5080/tcp 8021/tcp 8081/tcp 7443/tcp 16384-32768/udp
+
+# Start FreeSWITCH
+CMD ["freeswitch", "-nc", "-nonat", "-conf", "/usr/local/freeswitch/conf", "-log", "/usr/local/freeswitch/log", "-db", "/usr/local/freeswitch/db"]

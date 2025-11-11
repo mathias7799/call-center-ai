@@ -6,9 +6,11 @@
 # - SQLite (embedded in app container)
 
 services:
-  # FreeSWITCH - Open Source SIP Server
+  # FreeSWITCH - Open Source SIP Server (built from source)
   freeswitch:
-    image: drachtio/drachtio-freeswitch-mrf:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.freeswitch
     container_name: call-center-freeswitch
     hostname: freeswitch
     ports:
@@ -16,20 +18,21 @@ services:
       - "5060:5060/tcp"   # SIP TCP
       - "5080:5080/udp"  # SIP WebSocket
       - "8021:8021/tcp"   # ESL (Event Socket Library)
-      - "10000-10100:10000-10100/udp"  # RTP media (limited range for local)
+      - "8081:8081/tcp"   # WebSocket (mod_verto)
+      - "16384-20000:16384-20000/udp"  # RTP media
     volumes:
-      - ./freeswitch/conf:/etc/freeswitch:ro
-      - freeswitch-sounds:/usr/share/freeswitch/sounds
-      - freeswitch-recordings:/var/lib/freeswitch/recordings
-    environment:
-      - SOUND_RATES=8000:16000:32000:48000
+      - ./freeswitch-conf:/usr/local/freeswitch/conf
+      - ./freeswitch-logs:/usr/local/freeswitch/log
+      - freeswitch-recordings:/usr/local/freeswitch/recordings
     networks:
       - call-center-network
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "fs_cli", "-x", "status"]
       interval: 30s
-      timeout: 5s
-      retries: 3
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
   # Redis - Cache and pub/sub
   redis:
@@ -114,8 +117,6 @@ services:
 
 volumes:
   redis-data:
-    driver: local
-  freeswitch-sounds:
     driver: local
   freeswitch-recordings:
     driver: local
