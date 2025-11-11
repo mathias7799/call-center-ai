@@ -51,6 +51,9 @@ RUN uv sync --frozen
 # Copy application code
 COPY . .
 
+# Copy local SIP config as default config
+RUN cp config-local-sip.yaml config.yaml
+
 # Set Python path
 ENV PATH="/app/.venv/bin:${PATH}"
 ENV PYTHONUNBUFFERED=1
