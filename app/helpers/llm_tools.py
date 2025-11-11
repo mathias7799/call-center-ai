@@ -21,8 +21,8 @@ from app.models.reminder import ReminderModel
 from app.models.training import TrainingModel
 
 _db = CONFIG.database.instance
-_search = CONFIG.ai_search.instance
-_sms = CONFIG.sms.instance
+_search = CONFIG.ai_search.instance if CONFIG.ai_search else None
+_sms = CONFIG.sms.instance if CONFIG.communication_services else None
 
 
 class UpdateClaimDict(TypedDict):
@@ -314,6 +314,10 @@ class DefaultPlugin(AbstractPlugin):
         - Know the procedure to declare a stolen luxury watch
         - Understand the requirements to ask for a cyber attack insurance
         """
+        # Check if search is available
+        if not _search:
+            return "Search service is not configured"
+
         # Execute in parallel
         tasks = await asyncio.gather(
             *[
@@ -413,6 +417,10 @@ class DefaultPlugin(AbstractPlugin):
         - Confirm a detail like a reference number, if there is a misunderstanding
         - Send a confirmation, if the customer wants to have a written proof
         """
+        # Check if SMS is available
+        if not _sms:
+            return "SMS service is not configured"
+
         # Send SMS
         success = await _sms.send(
             content=message,
