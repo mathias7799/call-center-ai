@@ -1,11 +1,50 @@
-# Local SIP Testing Configuration
-# Minimal config for SIP telephony testing
-# Fill in your Azure credentials below
+# Local SIP Testing Configuration - Minimal Setup
+# Only Azure OpenAI and Cognitive Services required
 
 # Public domain
 public_domain: http://localhost:8080
 
-# Telephony - SIP mode
+# === REQUIRED: Fill in your Azure credentials ===
+
+# Azure OpenAI (REQUIRED)
+llm:
+  fast:
+    mode: azure
+    endpoint: https://mrxai.openai.azure.com/  # Replace with your endpoint
+    model: gpt-4o-mini
+    context: 128000
+    azure:
+      endpoint: https://mrxai.openai.azure.com/  # Replace with your endpoint
+      deployment: gpt-4o-mini
+      api_key: YOUR_AZURE_OPENAI_API_KEY_HERE  # Replace with your API key
+      streaming: true
+  slow:
+    mode: azure
+    endpoint: https://mrxai.openai.azure.com/  # Replace with your endpoint
+    model: gpt-4o
+    context: 128000
+    azure:
+      endpoint: https://mrxai.openai.azure.com/  # Replace with your endpoint
+      deployment: gpt-4o
+      api_key: YOUR_AZURE_OPENAI_API_KEY_HERE  # Replace with your API key
+      streaming: true
+
+# Azure Cognitive Services - Speech (REQUIRED)
+cognitive_service:
+  endpoint: https://mrxspeechtotext.cognitiveservices.azure.com/  # Replace with your endpoint
+  api_key: YOUR_AZURE_COGNITIVE_API_KEY_HERE  # Replace with your API key
+  region: northeurope  # Replace with your region
+
+# Resources (REQUIRED)
+resources:
+  public_url: http://localhost:8080
+  cognitive_service:
+    endpoint: https://mrxspeechtotext.cognitiveservices.azure.com/  # Replace with your endpoint
+    api_key: YOUR_AZURE_COGNITIVE_API_KEY_HERE  # Replace with your API key
+
+# === TELEPHONY Configuration ===
+
+# SIP Telephony
 telephony:
   mode: sip
   sip:
@@ -13,10 +52,12 @@ telephony:
     gateway_port: 5060
     username: "1234"
     password: "1234"
-    phone_number: "+15551234567"  # Must be E.164 format
+    phone_number: "+15551001234"  # Must be valid E.164 format (use a real test number)
     transport: udp
     rtp_port_range_start: 10000
     rtp_port_range_end: 20000
+
+# === LOCAL Storage & Cache ===
 
 # Database - SQLite for local
 database:
@@ -35,89 +76,27 @@ cache:
     host: redis
     port: 6379
 
-# SMS - Twilio (optional, set dummy values)
-sms:
-  mode: twilio
-  twilio:
-    account_sid: "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-    auth_token: "dummy_token"
-    phone_number: "+15551234567"
+# === CONVERSATION Settings ===
 
-# === FILL IN YOUR AZURE CREDENTIALS BELOW ===
-
-# Azure OpenAI (REQUIRED)
-llm:
-  fast:
-    mode: azure
-    endpoint: YOUR_AZURE_OPENAI_ENDPOINT_HERE  # e.g., https://your-resource.openai.azure.com/
-    model: gpt-4o-mini
-    context: 128000
-    azure:
-      endpoint: YOUR_AZURE_OPENAI_ENDPOINT_HERE
-      deployment: gpt-4o-mini
-      api_key: YOUR_AZURE_OPENAI_API_KEY_HERE
-      streaming: true
-  slow:
-    mode: azure
-    endpoint: YOUR_AZURE_OPENAI_ENDPOINT_HERE
-    model: gpt-4o
-    context: 128000
-    azure:
-      endpoint: YOUR_AZURE_OPENAI_ENDPOINT_HERE
-      deployment: gpt-4o
-      api_key: YOUR_AZURE_OPENAI_API_KEY_HERE
-      streaming: true
-
-# Azure Cognitive Services - Speech (REQUIRED)
-cognitive_service:
-  endpoint: YOUR_AZURE_COGNITIVE_ENDPOINT_HERE  # e.g., https://eastus.api.cognitive.microsoft.com/
-  api_key: YOUR_AZURE_COGNITIVE_API_KEY_HERE
-  region: eastus  # Change to your region
-
-# Azure AI Search (optional for local testing, set dummy values)
-ai_search:
-  endpoint: https://dummy.search.windows.net
-  api_key: dummy_key
-  index: call-center-index
-
-# Azure AI Translator (optional for local testing, set dummy values)
-ai_translation:
-  endpoint: https://api.cognitive.microsofttranslator.com/
-  api_key: dummy_key
-  region: global
-
-# Azure Communication Services (not used for SIP, but required by schema)
-communication_services:
-  endpoint: https://dummy.communication.azure.com
-  phone_number: "+15551234567"
-  resource_id: dummy_resource_id
-
-# Resources
-resources:
-  public_url: http://localhost:8080
-  cognitive_service:
-    endpoint: YOUR_AZURE_COGNITIVE_ENDPOINT_HERE
-    api_key: YOUR_AZURE_COGNITIVE_API_KEY_HERE
-
-# Conversation settings
 conversation:
   initiate:
     bot_company: "Contoso"
     bot_name: "Eva"
-    agent_phone_number: "+15551234567"  # Bot's phone number
     lang:
       default_short_code: "en-US"
-      default_voice_name: "en-US-AndrewNeural"
-  answer_hard_timeout_sec: 90
-  answer_soft_timeout_sec: 30
-  phone_silence_timeout_sec: 2
+      availables:
+        - short_code: "en-US"
+          voice: "en-US-AndrewNeural"
+          pronunciations_en: ["English", "EN", "United States"]
 
-# App Configuration (optional)
+# === OPTIONAL Services (not used for SIP testing) ===
+
+# App Configuration (empty = disabled)
 app_configuration:
   endpoint: ""
   refresh_interval_sec: 300
 
-# Monitoring (optional)
+# Monitoring (empty = disabled)
 monitoring:
   application_insights_connection_string: ""
 

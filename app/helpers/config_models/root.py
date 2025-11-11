@@ -34,11 +34,12 @@ class RootModel(BaseSettings):
     public_domain: str = Field(frozen=True)
     version: str = Field(default="0.0.0-unknown", frozen=True)
     # Editable fields
-    ai_search: AiSearchModel
-    ai_translation: AiTranslationModel
+    ai_search: AiSearchModel | None = None  # Optional for local testing
+    ai_translation: AiTranslationModel | None = None  # Optional for local testing
     cache: CacheModel = CacheModel()  # Object is fully defined by default
     cognitive_service: CognitiveServiceModel
-    communication_services: CommunicationServicesModel = Field(
+    communication_services: CommunicationServicesModel | None = Field(
+        default=None,  # Optional for SIP mode
         serialization_alias="communication_service",  # Compatibility with v5
     )
     database: DatabaseModel

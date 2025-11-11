@@ -75,7 +75,7 @@ class LanguageModel(BaseModel):
 
 
 class WorkflowInitiateModel(BaseModel):
-    agent_phone_number: PhoneNumber
+    agent_phone_number: PhoneNumber | None = None  # Optional for SIP mode
     bot_company: str
     bot_name: str
     claim: list[ClaimFieldModel] = [
