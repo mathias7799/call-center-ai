@@ -2,3 +2,4 @@
 !app/
 !pyproject.toml
 !uv.lock
+!config-local-sip.yaml
